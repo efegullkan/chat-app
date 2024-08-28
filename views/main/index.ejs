@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://kit.fontawesome.com/391827d54c.js" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="/static/main/style.css">
+  <title>Chat-App</title>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+
+<body>
+
+
+  <div class="background-green"></div>
+
+
+  <div class="main-container">
+    <div class="left-container">
+
+      <!--header -->
+      <div class="header">
+        <div class="user-img" onclick="handleClick('/settings')">
+          <img class="dp" src="/static/userImages/<%= userImage %>" alt="">
+        </div>
+        <div class="nav-icons">
+          <li><i class="fa-solid fa-users"></i></li>
+          <li><i class="fa-solid fa-message" onclick="handleClick('/')">
+            </i></li>
+          <li><i class="fa-solid fa-ellipsis-vertical" onclick="handleClick('/settings')"></i></li>
+        </div>
+      </div>
+
+
+
+      <!--search-container -->
+      <div class="search-container">
+        <div class="input">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" placeholder="Search or start new chat" id="searchbar"></div>
+        <i class="fa-sharp fa-solid fa-bars-filter"></i>
+      </div>
+
+
+      <!--chats -->
+      <div class="chat-list">
+      </div>
+    </div>
+
+
+
+
+    <% if (user) { %>
+    <div class="right-container">
+      <!--header -->
+      <div class="header">
+        <div class="img-text">
+          <div class="user-img">
+            <img class="dp" src="/static/userImages/<%= user.resim %>" alt="">
+          </div>
+          <h4><%= user.fullname %><br><span id="userStatus"><%= userStatus %></span></h4>
+        </div>
+        <div class="nav-icons">
+          <li><i class="fa-solid fa-magnifying-glass"></i></li>
+          <li><i class="fa-solid fa-ellipsis-vertical"></i></li>
+        </div>
+      </div>
+
+      <!--chat-container -->
+      <div class="chat-container" id="messages">
+      </div>
+      <!--input-bottom -->
+      <div class="chatbox-input">
+        <i class="fa-regular fa-face-grin"></i>
+        <i class="fa-sharp fa-solid fa-paperclip" id="icon"></i>
+        <input type="file" id="fileInput" accept="image/*,audio/*" style="display: none;">
+        <input type="text" id="messageInput" placeholder="Type a message">
+        <button id="sendButton" style="background: none; border: none;"><i class="fa-solid fa-paper-plane"></i></button>
+        <i class="fa-solid fa-microphone"></i>
+      </div>
+    </div>
+
+  </div>
+  <% } else { %>
+  <div class="right-container">
+    <!--header -->
+    <div class="header">
+      <div class="img-text">
+        <div class="user-img">
+          <img class="dp" src="/static/userImages/<%= userImage %>" alt="">
+        </div>
+        <h4><%= user.fullname %><br><span>Online</span></h4>
+      </div>
+      <div class="nav-icons">
+        <li><i class="fa-solid fa-magnifying-glass"></i></li>
+        <li><i class="fa-solid fa-ellipsis-vertical"></i></li>
+      </div>
+    </div>
+
+
+    <!--chat-container -->
+    <div class="chat-container" id="messages">
+      <h2>Konuşma başlatmak icin soldan bir kullanıcı sec</h2>
+    </div>
+    <% } %>
+
+    <script>
+      const icon = document.getElementById('icon')
+      if (icon) {
+        icon.addEventListener('click', function () {
+          document.getElementById('fileInput').click();
+        });
+      }
+
+
+      function redirectTo(url) {
+        window.location.href = url;
+      }
+
+      // Div tıklama olayını işleyen fonksiyon
+      function handleClick(url) {
+        redirectTo(url);
+      }
+    </script>
+    <script src="/socket.io/socket.io.js"></script>
+
+
+    <script type="module">
+    
+    import { openDB } from 'https://cdn.jsdelivr.net/npm/idb@8.0.0/+esm';
+
+    // IndexedDB Veritabanını Oluşturma
+    const dbPromise = openDB('chat-app-db', 1, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains('messages')) {
+          db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
+        }
+      }
+    });
+
+    // Mesajları IndexedDB'ye Kaydetme
+    async function saveMessageToIndexedDB({ message, senderId, recipientId, status }) {
+      const db = await dbPromise;
+      await db.add('messages', { message, senderId, recipientId, status, timestamp: Date.now() });
+    }
+    async function savefileToIndexedDB({ filePath, senderId, recipient, status }) {
+      const db = await dbPromise;
+      const recipientId = recipient;
+      await db.add('messages', { filePath, senderId, recipientId, status, timestamp: Date.now() });
+    }
+
+
+    async function getMessagesBetweenUsers(userId1, userId2) {
+      const db = await dbPromise;
+      const allMessages = await db.getAll('messages');
+        return allMessages.filter(message => 
+          (message.senderId == userId1 && message.recipientId == userId2) ||
+          (message.senderId == userId2 && message.recipientId == userId1)
+        );
+    }
+
+    // IndexedDB'den Mesajları Getirme
+    async function getMessagesFromIndexedDB() {
+      const db = await dbPromise;
+      return await db.getAll('messages');
+    }
+
+    async function getChatUsers() {
+      const db = await dbPromise;
+      const allMessages = await db.getAll('messages');
+      
+      // Kullanıcıları takip etmek için bir Set kullanın (tekrarları önler)
+      const userSet = new Set();
+      
+      // Mevcut kullanıcı kimliği
+      const currentUserId = '<%= userId %>';
+      
+      allMessages.forEach(message => {
+          userSet.add(Number(message.senderId));
+          userSet.add(Number(message.recipientId));
+      });
+      
+      // Set'i diziye dönüştür
+      const users = Array.from(userSet);
+      return users;
+    }
+
+    async function getLastMessageForUser(userId) {
+      const db = await dbPromise;
+
+      // Tüm mesajları al
+      const messages = await db.getAll('messages');
+
+      // Kullanıcı ile olan mesajları filtrele
+      const userMessages = messages.filter(message =>
+        message.senderId == userId || message.recipientId == userId
+      );
+
+      const userMessagesFull = messages.filter(message =>
+        message.senderId == userId && message.status == 'send'
+      );
+
+      const notReadedMessages = userMessagesFull.length;
+      let nrm = ''
+      if (notReadedMessages != 0) {
+        nrm = notReadedMessages
+      }
+      
+      // Son mesajı bul
+      if (userMessages.length > 0) {
+        // Mesajları zaman damgasına göre sırala (en son mesajı bul)
+        userMessages.sort((a, b) => b.timestamp - a.timestamp);
+        return [userMessages[0], nrm];
+      } else {
+        return null;
+      }
+    }
+    
+
+
+
+    async function filterUsers() {
+        const searchQuery = document.getElementById('searchbar').value.toLowerCase();
+        const chatList = document.querySelector('.chat-list');
+        chatList.innerHTML = ''; // Mevcut listeyi temizle
+        
+
+        if(searchQuery){
+          const usersFull = <%- JSON.stringify(users) %>; // Tüm kullanıcılar
+
+          usersFull.forEach(user => {
+              const userName = user.fullname.toLowerCase();
+              if (userName.includes(searchQuery)) {
+                  // Kullanıcı arama kriterine uyuyorsa, listeye ekle
+                  const chatBox = document.createElement('div');
+                  chatBox.classList.add('chat-box');
+                  chatBox.classList.add(user.id);
+                  chatBox.onclick = () => handleClick(`/${user.id}`);
+                  
+                  chatBox.innerHTML = `
+                      <div class="img-box">
+                          <img class="img-cover" src="/static/userImages/${user.resim}" alt="">
+                      </div>
+                      <div class="chat-details">
+                          <div class="text-head">
+                              <h4>${user.fullname}</h4>
+                              <p class="time">08:49</p>
+                          </div>
+                          <div class="text-message">
+                              <p></p>
+                          </div>
+                      </div>
+                  `;
+
+                  chatList.appendChild(chatBox);
+              }
+          });
+        }
+        else{
+          await displayChatUsers();
+        }
+    }
+
+    async function displayChatUsers() {
+      const users = await getChatUsers();
+      const chatList = document.querySelector('.chat-list');
+      const usersFull = <%- JSON.stringify(users) %>;
+      users.forEach(async userId => {
+        if(userId){
+        const user = usersFull.filter(user => user.id === userId); 
+        let lastMessageText = 'No messages yet';
+        let lastMessageTime = '';
+        if(user.length > 0){
+        const lasstMessage = await getLastMessageForUser(userId)
+        .then((lastMessage) => {
+           if (lastMessage[0].message) {
+            lastMessageText = lastMessage[0].message;
+           }
+           else if (lastMessage[0].filePath) {
+            lastMessageText = 'resim';
+           }
+           else{
+            lastMessageText = ''
+           }
+          
+           lastMessageTime = lastMessage ? new Date(lastMessage[0].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+           const chatBox = document.createElement('div');
+          chatBox.classList.add('chat-box');
+          chatBox.classList.add(userId);
+          chatBox.onclick = () => handleClick(`/${userId}`);
+          const currentUrl = window.location.href;
+          const arr = currentUrl.split('/');
+          const lastel = arr[arr.length - 1];
+          
+          if(userId == lastel){
+            chatBox.classList.add('active');
+          }
+          if (lastMessage[1] != '') {
+            chatBox.innerHTML = `
+            <div class="img-box">
+              <img class="img-cover" src="/static/userImages/${user[0].resim}" alt="">
+            </div>
+            <div class="chat-details">
+              <div class="text-head">
+                <h4>${user[0].fullname}</h4>
+                <p class="time">${lastMessageTime}</p>
+              </div>
+              <div class="text-message">
+                <p>“${lastMessageText}”</p>
+                <b>${lastMessage[1]}</b>
+              </div>
+            </div>
+          `;
+          } else {
+            chatBox.innerHTML = `
+            <div class="img-box">
+              <img class="img-cover" src="/static/userImages/${user[0].resim}" alt="">
+            </div>
+            <div class="chat-details">
+              <div class="text-head">
+                <h4>${user[0].fullname}</h4>
+                <p class="time">${lastMessageTime}</p>
+              </div>
+              <div class="text-message">
+                <p>“${lastMessageText}”</p>
+              </div>
+            </div>
+          `;
+          }
+          
+          
+          // Chat listesinin sonuna ekleyin
+          chatList.appendChild(chatBox);
+        })
+        .catch((error) => {
+            console.error('Error fetching last message:', error);
+            // Hata durumunda yapılacak işlemler burada olabilir
+        });;
+        }
+      }
+      
+      });
+    }
+
+
+
+
+    // Sayfa yüklendiğinde eski mesajları alıp göster
+    window.addEventListener('load', async () => {
+      const currentUrl = window.location.href;
+      const arr = currentUrl.split('/');
+      const otherUserId = arr[arr.length - 1];
+      const userId = '<%= userId %>';
+
+      // Mesajları al ve DOM'a ekle
+      const messages = await getMessagesBetweenUsers(userId, otherUserId);
+      messages.forEach(message => addMessageToDOM(message));
+
+      // Kullanıcıları listele
+      await displayChatUsers();
+
+      // Arama fonksiyonunu ayarla
+      document.getElementById('searchbar').addEventListener('input', filterUsers);
+    });
+
+   
+
+      function addMessageToDOM({ message, filePath, senderId, status }) {
+        // Mesaj kutusunu oluştur
+        const messageBox = document.createElement('div');
+        messageBox.classList.add('message-box');
+        var currentUrl = window.location.href;
+          const arr = currentUrl.split('/');
+
+          const lastElement = arr[arr.length - 1];
+        // Gönderen kişiye göre stil belirleme
+        let statusText = ''
+        let statusColor = ''
+        if (status == 'not-send') {
+          statusText = '✓'
+          statusColor = 'DarkGrey'
+        }
+        else if (status == 'send') {
+          statusText = '✓✓'
+          statusColor = 'DarkGrey'
+        }
+        else if (status == 'read'){
+           statusText = '✓✓'
+           statusColor = 'DodgerBlue'
+        }
+        if(filePath){
+          if (senderId == lastElement) {
+            messageBox.classList.add('friend-message'); 
+            statusText = ''// Arkadaşa ait mesaj
+            messageBox.innerHTML = `<p> <img src="/static/${filePath}" alt=""><br><span style="display: inline-block">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></p>`;
+            messages.appendChild(messageBox);
+        } else {
+            messageBox.classList.add('my-message'); // Gönderen kişiye ait mesaj
+            messageBox.innerHTML = `<p><img src="/static/${filePath}" alt=""><br><span style="display: inline-block">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span><span class="statusText" style="color: ${statusColor};">${statusText}</span></p>`;
+            messages.appendChild(messageBox);
+        }
+        }
+        else{
+          if (senderId == lastElement) {
+            messageBox.classList.add('friend-message'); 
+            statusText = ''// Arkadaşa ait mesaj
+            messageBox.innerHTML = `<p>${message}<br><span style="display: inline-block">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></p>`;
+            messages.appendChild(messageBox);
+        } else {
+            messageBox.classList.add('my-message'); // Gönderen kişiye ait mesaj
+            messageBox.innerHTML = `<p>${message}<br><span style="display: inline-block">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span><span class="statusText" style="color: ${statusColor};">${statusText}</span></p>`;
+            messages.appendChild(messageBox);
+        }
+        }
+      
+        messages.scrollTop = messages.scrollHeight;
+      }
+      
+
+    // Socket.io ile gelen mesajları işleme
+    const socket = io();
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+    const messages = document.getElementById('messages');
+
+    if(sendButton){sendButton.addEventListener('click', () => {
+        const fileInput = document.getElementById('fileInput');
+        const file = fileInput.files[0];
+        var currentUrl = window.location.href;
+        const arr = currentUrl.split('/');
+        const recipient = arr[arr.length - 1];
+        if(file){
+          const formData = new FormData();
+          formData.append('file', file);
+
+          fetch('/upload', {
+            method: 'POST',
+            body: formData,
+            headers: {
+            'X-CSRF-Token': '<%= csrfToken %>'
+            }
+          })
+          .then(response => response.json())
+          .then(data => {
+            socket.emit('sendMedia', { filePath: data.filePath, type: formData.get('file').type, recipient });
+          });
+        }
+        else{
+          const message = messageInput.value;
+          if (message.trim() && recipient.trim()) {
+              socket.emit('private message', { recipientId: recipient, message });
+              messageInput.value = '';
+          }
+        }
+    });}
+
+    socket.on('receiveMedia', async (data) => {
+      const {filePath, type, recipient, status, senderId} = data;
+      if (type.startsWith('image/')) {
+          if ('<%= user.id %>' == senderId || '<%= user.id %>' == recipient) {
+          if('<%= user.id %>' == senderId){
+            await savefileToIndexedDB({ filePath, senderId, recipient, status: 'read', timestamp: Date.now()});
+          }
+          else{
+            await savefileToIndexedDB({ filePath, senderId, recipient, status, timestamp: Date.now()});
+          }
+          addMessageToDOM({ filePath, senderId, status });
+          const readedUser = '<%= user.id %>'
+          const userId = '<%= userId %>'
+          socket.emit('reading message', { readedUser, userId });
+        }
+        
+        else{
+          await savefileToIndexedDB({ filePath, senderId, recipient, status, timestamp: Date.now()});
+          displayChatUsers()
+        }
+      } else if (type.startsWith('audio/')) {
+        const audio = document.createElement('audio');
+        audio.src = data.filePath;
+        audio.controls = true;
+        document.body.appendChild(audio);
+      }
+    });
+
+    socket.on('chat message', async (data) => {
+        const { message, senderId, recipientId, status } = data;
+        // Mesajı IndexedDB'ye kaydet
+        
+        // Mesajı DOM'a ekle
+        if ('<%= user.id %>' == senderId || '<%= user.id %>' == recipientId) {
+          if('<%= user.id %>' == senderId){
+            await saveMessageToIndexedDB({ message, senderId, recipientId, status: 'read', timestamp: Date.now()});
+          }
+          else{
+            await saveMessageToIndexedDB({ message, senderId, recipientId, status, timestamp: Date.now()});
+          }
+          addMessageToDOM({ message, senderId, status });
+          const readedUser = '<%= user.id %>'
+          const userId = '<%= userId %>'
+          socket.emit('reading message', { readedUser, userId });
+        }
+        else{
+          await saveMessageToIndexedDB({ message, senderId, recipientId, status, timestamp: Date.now()});
+          displayChatUsers()
+        }
+    });
+
+    if ('<%= user %>' != '') {
+      const readedUser = '<%= user.id %>'
+      const userId = '<%= userId %>'
+      socket.emit('reading message', { readedUser, userId });
+      const db = await dbPromise;
+      const allMessages = await db.getAll('messages');
+      const transaction = db.transaction('messages', 'readwrite');
+      const store = transaction.objectStore('messages');
+      const filteredMesages = allMessages.filter(message => 
+      (message.senderId == readedUser && message.recipientId == userId));
+      filteredMesages.forEach(async message => {
+              // Mesajın status değerini 'send' olarak güncelle
+              message.status = 'read';
+              
+              // Mesajı veritabanında güncelle
+              store.put(message);
+            });
+      await transaction.complete; 
+    }
+
+    socket.on('read message', async (data) => {
+    const { readedUser, userId } = data;
+    const db = await dbPromise;
+            const allMessages = await db.getAll('messages');
+            const filteredMesages = allMessages.filter(message => 
+            (message.senderId == readedUser && message.recipientId == userId));
+            // Mesajların status değerini güncelle
+            const transaction = db.transaction('messages', 'readwrite');
+            const store = transaction.objectStore('messages');
+            const spans = document.querySelectorAll('.statusText');
+            spans.forEach(span => {
+            span.textContent = '✓✓';
+            span.style.color = 'DodgerBlue';
+            });
+            filteredMesages.forEach(async message => {
+              // Mesajın status değerini 'send' olarak güncelle
+              message.status = 'read';
+              // Mesajı veritabanında güncelle
+              store.put(message);
+            });
+
+            await transaction.complete;
+    });
+    
+    socket.on('user status update', async (data) => {
+    const { userId, isOnline, lastActive } = data;
+    const userStatusElement = document.getElementById('userStatus');
+    const db = await dbPromise;
+            const allMessages = await db.getAll('messages');
+            const filteredMesages = allMessages.filter(message => 
+            (message.senderId == userId && message.recipientId == '<%= userId %>') ||
+            (message.senderId == '<%= userId %>' && message.recipientId == userId));
+            // Mesajların status değerini güncelle
+           
+            const transaction = db.transaction('messages', 'readwrite');
+            const store = transaction.objectStore('messages');
+            filteredMesages.forEach(async message => {
+              // Mesajın status değerini 'send' olarak güncelle
+              if (message.status != 'read') {
+                
+                message.status = 'send';
+                const spans = document.querySelectorAll('.statusText');
+                spans.forEach(span => {
+                span.textContent = '✓✓';
+                span.style.color = 'DarkGrey';
+                });
+              }
+             
+              
+              // Mesajı veritabanında güncelle
+              store.put(message);
+            });
+
+            await transaction.complete;
+    if (userId == '<%= user.id %>') {
+        if (isOnline) {
+            userStatusElement.textContent = 'Online';
+        } else {
+            const timeAgo = getTimeAgo(new Date(lastActive));
+            userStatusElement.textContent = `(${timeAgo} önce aktifti)`;
+        }
+      }
+    });
+    function getTimeAgo(date) {
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000); // farkı saniye cinsinden hesapla
+
+    if (diff < 60) return `${diff} saniye`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} dakika`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} saat`;
+    return `${Math.floor(diff / 86400)} gün`;
+}
+</script>
+</body>
+
+</html>
